@@ -1,7 +1,8 @@
 mod pdf_processor;
 
 use pdf_processor::{
-    load_pdfs_standalone, save_pdf_standalone, LoadResult, PageItem as ProcPageItem, PdfProcessor,
+    load_pdfs_standalone, rgba_to_image, save_pdf_standalone, LoadResult, PageItem as ProcPageItem,
+    PdfProcessor,
 };
 use slint::{ModelRc, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
@@ -49,31 +50,16 @@ fn apply_load_result(proc: &mut PdfProcessor, load_result: LoadResult) {
         });
     }
     for p in load_result.pages {
+        let preview = rgba_to_image(&p.rgba, p.width, p.height);
         proc.pages.push(ProcPageItem {
             source_path: p.source_path,
             source_file: p.source_file,
             page_number: p.page_number,
             display_text: p.display_text,
-            preview: slint::Image::default(),
-            preview_rendered: false,
+            preview,
             rotation: 0,
         });
     }
-}
-
-/// Render previews for visible pages and update the UI model.
-fn render_visible_and_update(ui: &AppWindow, proc: &mut PdfProcessor) {
-    let viewport_y = ui.get_viewport_y() as f64;
-    let mut viewport_h = ui.get_viewport_h() as f64;
-    let item_height = 192.0; // matches DragConstants.item-height
-
-    // On first load, viewport-h may be 0 — use window height as fallback
-    if viewport_h <= 0.0 {
-        viewport_h = 700.0;
-    }
-
-    proc.render_visible_previews(viewport_y, viewport_h, item_height);
-    update_ui(ui, proc);
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -95,16 +81,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     );
-
-    // Handle scroll — render previews for newly visible pages
-    let ui_weak = ui.as_weak();
-    let processor_clone = processor.clone();
-    ui.on_viewport_scrolled(move || {
-        if let Some(ui) = ui_weak.upgrade() {
-            let mut proc = processor_clone.borrow_mut();
-            render_visible_and_update(&ui, &mut proc);
-        }
-    });
 
     // Handle upload button click — deferred to allow loading overlay to paint
     let ui_weak = ui.as_weak();
@@ -134,8 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(load_result) => {
                             let mut proc = proc_deferred.borrow_mut();
                             apply_load_result(&mut proc, load_result);
-                            // Render only visible pages, then update UI
-                            render_visible_and_update(&ui, &mut proc);
+                            update_ui(&ui, &proc);
                         }
                         Err(e) => {
                             show_error(&ui, &e);
@@ -166,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         proc.move_page(from as usize, to as usize);
 
         if let Some(ui) = ui_weak.upgrade() {
-            render_visible_and_update(&ui, &mut proc);
+            update_ui(&ui, &proc);
         }
     });
 

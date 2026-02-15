@@ -20,7 +20,6 @@ pub struct PageItem {
     pub page_number: usize,
     pub display_text: String,
     pub preview: Image,
-    pub preview_rendered: bool,
     pub rotation: i32,
 }
 
@@ -84,61 +83,20 @@ impl PdfProcessor {
         }
     }
 
-    /// Render previews only for pages visible in the viewport.
-    /// `viewport_y` is the (negative) scroll offset, `viewport_h` is the visible height.
-    /// `item_height` is the height of each card slot (card + spacing).
-    pub fn render_visible_previews(&mut self, viewport_y: f64, viewport_h: f64, item_height: f64) {
-        let padding = 16.0;
-        let scroll_top = -viewport_y - padding;
-        let scroll_bottom = scroll_top + viewport_h;
-
-        let first_visible = ((scroll_top / item_height).floor() as isize).max(0) as usize;
-        let last_visible = ((scroll_bottom / item_height).ceil() as usize).min(self.pages.len());
-
-        // Render a buffer of pages around the visible range
-        let buffer = 2;
-        let start = first_visible.saturating_sub(buffer);
-        let end = (last_visible + buffer).min(self.pages.len());
-
-        for i in start..end {
-            if self.pages[i].preview_rendered {
-                continue;
-            }
-
-            let page_item = &self.pages[i];
-            let poppler_doc = match PopplerDocument::new_from_file(&page_item.source_path, None) {
-                Ok(doc) => doc,
-                Err(_) => continue,
-            };
-
-            let page_index = page_item.page_number - 1;
-            if let Some(page) = poppler_doc.get_page(page_index) {
-                let (pw, ph) = page.get_size();
-                let scale = PREVIEW_WIDTH / pw;
-                let w = (pw * scale) as i32;
-                let h = (ph * scale) as i32;
-
-                if let Ok((rgba, width, height)) = render_page_to_rgba(&page, w, h, scale, 0) {
-                    self.pages[i].preview = rgba_to_image(&rgba, width, height);
-                    self.pages[i].preview_rendered = true;
-                }
-            }
-        }
-    }
-
     pub fn clear(&mut self) {
         self.files.clear();
         self.pages.clear();
     }
 }
 
-/// Raw page data returned from load (no slint::Image since poppler isn't thread-safe,
-/// but we still use this for the deferred timer-based loading pattern).
 pub struct RawPageData {
     pub source_path: String,
     pub source_file: String,
     pub page_number: usize,
     pub display_text: String,
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
 }
 
 pub struct RawFileData {
@@ -152,8 +110,6 @@ pub struct LoadResult {
     pub pages: Vec<RawPageData>,
 }
 
-/// Load PDFs — only parse structure (page count), skip rendering.
-/// Previews are rendered lazily when pages scroll into view.
 pub fn load_pdfs_standalone(paths: &[String]) -> Result<LoadResult, String> {
     let mut files = Vec::new();
     let mut pages = Vec::new();
@@ -174,12 +130,33 @@ pub fn load_pdfs_standalone(paths: &[String]) -> Result<LoadResult, String> {
             page_count,
         });
 
+        let poppler_doc = PopplerDocument::new_from_file(path, None)
+            .map_err(|e| format!("Error rendering {}: {}", path, e))?;
+
         for page_num in 0..page_count {
+            let (rgba, width, height) = match poppler_doc.get_page(page_num) {
+                Some(page) => {
+                    let (pw, ph) = page.get_size();
+                    let scale = PREVIEW_WIDTH / pw;
+                    let w = (pw * scale) as i32;
+                    let h = (ph * scale) as i32;
+
+                    match render_page_to_rgba(&page, w, h, scale, 0) {
+                        Ok(data) => data,
+                        Err(_) => (Vec::new(), 0, 0),
+                    }
+                }
+                None => (Vec::new(), 0, 0),
+            };
+
             pages.push(RawPageData {
                 source_path: path.clone(),
                 source_file: filename.clone(),
                 page_number: page_num + 1,
                 display_text: format!("{} - Page {}", filename, page_num + 1),
+                rgba,
+                width,
+                height,
             });
         }
     }
