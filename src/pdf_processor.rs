@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use lopdf::{Document, Object, ObjectId};
 use poppler::cairo;
 use poppler::PopplerDocument;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
-const PREVIEW_WIDTH: f64 = 200.0;
+const PREVIEW_WIDTH: f64 = 120.0;
 
 #[derive(Clone)]
 pub struct PdfFile {
@@ -20,6 +20,7 @@ pub struct PageItem {
     pub page_number: usize,
     pub display_text: String,
     pub preview: Image,
+    pub preview_rendered: bool,
     pub rotation: i32,
 }
 
@@ -57,13 +58,9 @@ impl PdfProcessor {
         let page_item = &mut self.pages[index];
         page_item.rotation = (page_item.rotation + 90) % 360;
 
-        // Re-render the preview with the new rotation
         let poppler_doc = match PopplerDocument::new_from_file(&page_item.source_path, None) {
             Ok(doc) => doc,
-            Err(e) => {
-                eprintln!("Failed to load PDF for rotation preview: {}", e);
-                return;
-            }
+            Err(_) => return,
         };
 
         let page_index = page_item.page_number - 1;
@@ -71,7 +68,6 @@ impl PdfProcessor {
             let (pw, ph) = page.get_size();
             let rotation = page_item.rotation;
 
-            // For 90/270 rotations, swap dimensions
             let (ew, eh) = if rotation == 90 || rotation == 270 {
                 (ph, pw)
             } else {
@@ -82,12 +78,49 @@ impl PdfProcessor {
             let w = (ew * scale) as i32;
             let h = (eh * scale) as i32;
 
-            match render_page_to_image(&page, w, h, scale, rotation) {
-                Ok(img) => {
-                    self.pages[index].preview = img;
-                }
-                Err(e) => {
-                    eprintln!("Failed to render rotated preview: {}", e);
+            if let Ok((rgba, width, height)) = render_page_to_rgba(&page, w, h, scale, rotation) {
+                self.pages[index].preview = rgba_to_image(&rgba, width, height);
+            }
+        }
+    }
+
+    /// Render previews only for pages visible in the viewport.
+    /// `viewport_y` is the (negative) scroll offset, `viewport_h` is the visible height.
+    /// `item_height` is the height of each card slot (card + spacing).
+    pub fn render_visible_previews(&mut self, viewport_y: f64, viewport_h: f64, item_height: f64) {
+        let padding = 16.0;
+        let scroll_top = -viewport_y - padding;
+        let scroll_bottom = scroll_top + viewport_h;
+
+        let first_visible = ((scroll_top / item_height).floor() as isize).max(0) as usize;
+        let last_visible = ((scroll_bottom / item_height).ceil() as usize).min(self.pages.len());
+
+        // Render a buffer of pages around the visible range
+        let buffer = 2;
+        let start = first_visible.saturating_sub(buffer);
+        let end = (last_visible + buffer).min(self.pages.len());
+
+        for i in start..end {
+            if self.pages[i].preview_rendered {
+                continue;
+            }
+
+            let page_item = &self.pages[i];
+            let poppler_doc = match PopplerDocument::new_from_file(&page_item.source_path, None) {
+                Ok(doc) => doc,
+                Err(_) => continue,
+            };
+
+            let page_index = page_item.page_number - 1;
+            if let Some(page) = poppler_doc.get_page(page_index) {
+                let (pw, ph) = page.get_size();
+                let scale = PREVIEW_WIDTH / pw;
+                let w = (pw * scale) as i32;
+                let h = (ph * scale) as i32;
+
+                if let Ok((rgba, width, height)) = render_page_to_rgba(&page, w, h, scale, 0) {
+                    self.pages[i].preview = rgba_to_image(&rgba, width, height);
+                    self.pages[i].preview_rendered = true;
                 }
             }
         }
@@ -99,32 +132,28 @@ impl PdfProcessor {
     }
 }
 
-/// Raw page data returned from background thread (no slint::Image since it's not Send).
+/// Raw page data returned from load (no slint::Image since poppler isn't thread-safe,
+/// but we still use this for the deferred timer-based loading pattern).
 pub struct RawPageData {
     pub source_path: String,
     pub source_file: String,
     pub page_number: usize,
     pub display_text: String,
-    pub rgba: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
 }
 
-/// Raw file data returned from background thread.
 pub struct RawFileData {
     pub path: String,
     pub filename: String,
     pub page_count: usize,
 }
 
-/// Result of loading PDFs on a background thread.
 pub struct LoadResult {
     pub files: Vec<RawFileData>,
     pub pages: Vec<RawPageData>,
 }
 
-/// Standalone load function that can be called from a background thread.
-/// Returns raw RGBA pixel data instead of slint::Image.
+/// Load PDFs — only parse structure (page count), skip rendering.
+/// Previews are rendered lazily when pages scroll into view.
 pub fn load_pdfs_standalone(paths: &[String]) -> Result<LoadResult, String> {
     let mut files = Vec::new();
     let mut pages = Vec::new();
@@ -145,33 +174,12 @@ pub fn load_pdfs_standalone(paths: &[String]) -> Result<LoadResult, String> {
             page_count,
         });
 
-        let poppler_doc = PopplerDocument::new_from_file(path, None)
-            .map_err(|e| format!("Error rendering {}: {}", path, e))?;
-
         for page_num in 0..page_count {
-            let (rgba, width, height) = match poppler_doc.get_page(page_num) {
-                Some(page) => {
-                    let (pw, ph) = page.get_size();
-                    let scale = PREVIEW_WIDTH / pw;
-                    let w = (pw * scale) as i32;
-                    let h = (ph * scale) as i32;
-
-                    match render_page_to_rgba(&page, w, h, scale, 0) {
-                        Ok(data) => data,
-                        Err(_) => (Vec::new(), 0, 0),
-                    }
-                }
-                None => (Vec::new(), 0, 0),
-            };
-
             pages.push(RawPageData {
                 source_path: path.clone(),
                 source_file: filename.clone(),
                 page_number: page_num + 1,
                 display_text: format!("{} - Page {}", filename, page_num + 1),
-                rgba,
-                width,
-                height,
             });
         }
     }
@@ -188,14 +196,22 @@ pub fn rgba_to_image(rgba: &[u8], width: u32, height: u32) -> Image {
     Image::from_rgba8(buf)
 }
 
-/// Standalone save function that can be called from a background thread.
-/// Takes a list of (source_path, page_number, rotation) tuples.
+/// Save merged PDF. Caches loaded documents so each source file is only read once.
 pub fn save_pdf_standalone(
     pages: &[(String, usize, i32)],
     output_path: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if pages.is_empty() {
         return Err("No pages to save".into());
+    }
+
+    // Cache: load each unique source file only once
+    let mut doc_cache: HashMap<String, Document> = HashMap::new();
+    for (source_path, _, _) in pages {
+        if !doc_cache.contains_key(source_path) {
+            let doc = Document::load(source_path)?;
+            doc_cache.insert(source_path.clone(), doc);
+        }
     }
 
     let mut max_id = 1u32;
@@ -205,7 +221,8 @@ pub fn save_pdf_standalone(
     let mut pages_object: Option<(ObjectId, Object)> = None;
 
     for (source_path, page_number, _rotation) in pages {
-        let mut doc = Document::load(source_path)?;
+        // Clone from cache so we can mutate (delete pages, renumber)
+        let mut doc = doc_cache.get(source_path).unwrap().clone();
 
         let page_ids: BTreeMap<u32, ObjectId> = doc.get_pages();
         let _page_object_id = page_ids
@@ -319,7 +336,7 @@ pub fn save_pdf_standalone(
     Ok(())
 }
 
-/// Render a page to raw RGBA bytes (thread-safe, no slint types).
+/// Render a page to raw RGBA bytes.
 fn render_page_to_rgba(
     page: &poppler::PopplerPage,
     w: i32,
@@ -382,74 +399,4 @@ fn render_page_to_rgba(
     }
 
     Ok((rgba, width, height))
-}
-
-fn render_page_to_image(
-    page: &poppler::PopplerPage,
-    w: i32,
-    h: i32,
-    scale: f64,
-    rotation: i32,
-) -> Result<Image, Box<dyn std::error::Error>> {
-    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)?;
-    let ctx = cairo::Context::new(&surface)?;
-
-    // White background
-    ctx.set_source_rgb(1.0, 1.0, 1.0);
-    ctx.paint()?;
-
-    // Apply rotation around center then scale
-    let (pw, ph) = page.get_size();
-    match rotation {
-        90 => {
-            ctx.translate(w as f64, 0.0);
-            ctx.rotate(std::f64::consts::FRAC_PI_2);
-            ctx.scale(w as f64 / ph, h as f64 / pw);
-        }
-        180 => {
-            ctx.translate(w as f64, h as f64);
-            ctx.rotate(std::f64::consts::PI);
-            ctx.scale(scale, scale);
-        }
-        270 => {
-            ctx.translate(0.0, h as f64);
-            ctx.rotate(-std::f64::consts::FRAC_PI_2);
-            ctx.scale(w as f64 / ph, h as f64 / pw);
-        }
-        _ => {
-            ctx.scale(scale, scale);
-        }
-    }
-    page.render(&ctx);
-
-    ctx.show_page()?;
-    drop(ctx);
-    surface.flush();
-
-    // Convert Cairo ARGB32 (native-endian premultiplied) to Slint RGBA8
-    let data = surface.data()?;
-    let width = w as u32;
-    let height = h as u32;
-    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-
-    for pixel in data.chunks_exact(4) {
-        // Cairo ARGB32 on little-endian: [B, G, R, A] (premultiplied)
-        let b = pixel[0];
-        let g = pixel[1];
-        let r = pixel[2];
-        let a = pixel[3];
-
-        // Un-premultiply
-        if a == 0 {
-            rgba.extend_from_slice(&[0, 0, 0, 0]);
-        } else {
-            let un_r = ((r as u16 * 255) / a as u16).min(255) as u8;
-            let un_g = ((g as u16 * 255) / a as u16).min(255) as u8;
-            let un_b = ((b as u16 * 255) / a as u16).min(255) as u8;
-            rgba.extend_from_slice(&[un_r, un_g, un_b, a]);
-        }
-    }
-
-    let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba, width, height);
-    Ok(Image::from_rgba8(buf))
 }

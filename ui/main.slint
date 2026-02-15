@@ -41,12 +41,17 @@ export component AppWindow inherits Window {
     in-out property <bool> loading: false;
     in-out property <float> spinner-angle: 0;
 
+    // Viewport tracking for lazy rendering
+    in-out property <float> viewport-y: 0;
+    in-out property <float> viewport-h: 0;
+
     callback upload-clicked();
     callback delete-page(int);
     callback move-page(int, int);
     callback convert-clicked();
     callback clear-clicked();
     callback rotate-page(int);
+    callback viewport-scrolled();
 
     VerticalBox {
         spacing: 0px;
@@ -103,6 +108,9 @@ export component AppWindow inherits Window {
                                     list-flick.viewport-y + event.delta-y,
                                     min(0px, -list-flick.viewport-height + list-flick.height),
                                     0px);
+                                root.viewport-y = list-flick.viewport-y / 1px;
+                                root.viewport-h = list-flick.height / 1px;
+                                root.viewport-scrolled();
                                 return accept;
                             }
                         }
@@ -127,6 +135,9 @@ export component AppWindow inherits Window {
                                                 list-flick.viewport-y + event.delta-y,
                                                 min(0px, -list-flick.viewport-height + list-flick.height),
                                                 0px);
+                                            root.viewport-y = list-flick.viewport-y / 1px;
+                                            root.viewport-h = list-flick.height / 1px;
+                                            root.viewport-scrolled();
                                             if root.dragging {
                                                 root.drag-target-index = max(0, min(
                                                     root.page-list.length - 1,
