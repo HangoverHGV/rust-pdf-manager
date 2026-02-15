@@ -10,6 +10,8 @@
 .DS_Store
 desktop.ini
 .claude
+*build
+pkg
 
 ## Editor
 *.swp

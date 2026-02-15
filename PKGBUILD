@@ -9,13 +9,23 @@ depends=('poppler-glib' 'cairo' 'gtk3')
 makedepends=('rust' 'cargo' 'pkg-config')
 source=()
 
+prepare() {
+    # Copy project sources into a build directory to avoid pkg/ permission issues
+    _builddir="$startdir/_build"
+    rm -rf "$_builddir"
+    mkdir -p "$_builddir"
+    cp -r "$startdir/src" "$startdir/ui" "$startdir/build.rs" \
+          "$startdir/Cargo.toml" "$startdir/Cargo.lock" \
+          "$startdir/packaging" "$startdir/LICENSE" "$_builddir/"
+}
+
 build() {
-    cd "$startdir"
+    cd "$startdir/_build"
     cargo build --release --locked
 }
 
 package() {
-    cd "$startdir"
+    cd "$startdir/_build"
 
     # Binary
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"

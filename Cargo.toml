@@ -9,7 +9,7 @@ license = "MIT"
 lopdf = "0.39.0"
 poppler = { version = "0.6", features = ["render"] }
 rfd = "0.15"
-slint = "1.14.1"
+slint = { version = "1.14.1", default-features = false, features = ["backend-winit", "renderer-femtovg", "compat-1-2"] }
 
 [build-dependencies]
 slint-build = "1.14.1"
