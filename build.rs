@@ -1,4 +1,7 @@
 fn main() {
+    println!("cargo:rerun-if-changed=ui/");
+    println!("cargo:rerun-if-changed=build.rs");
+
     slint_build::compile("ui/main.slint").expect("Slint build failed");
 
     // Embed icon and metadata on Windows builds
