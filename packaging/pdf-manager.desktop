@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=PDF Manager
+Comment=Merge, reorder, rotate and manage PDF documents
+Exec=pdf-manager
+Icon=pdf-manager
+Terminal=false
+Type=Application
+Categories=Office;Utility;
+MimeType=application/pdf;

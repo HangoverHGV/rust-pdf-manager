@@ -1,10 +1,12 @@
+#![windows_subsystem = "windows"]
+
 mod pdf_processor;
 
 use pdf_processor::{
     load_pdfs_standalone, rgba_to_image, save_pdf_standalone, LoadResult, PageItem as ProcPageItem,
     PdfProcessor,
 };
-use slint::{ModelRc, Timer, TimerMode, VecModel};
+use slint::{ModelRc, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -66,23 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = AppWindow::new()?;
     let processor = Rc::new(RefCell::new(PdfProcessor::new()));
 
-    // Spinner animation timer
-    let spinner_timer = Timer::default();
-    let ui_weak_spinner = ui.as_weak();
-    spinner_timer.start(
-        TimerMode::Repeated,
-        std::time::Duration::from_millis(16),
-        move || {
-            if let Some(ui) = ui_weak_spinner.upgrade() {
-                if ui.get_loading() {
-                    let angle = ui.get_spinner_angle();
-                    ui.set_spinner_angle((angle + 6.0) % 360.0);
-                }
-            }
-        },
-    );
-
-    // Handle upload button click — deferred to allow loading overlay to paint
+    // Handle upload button click
     let ui_weak = ui.as_weak();
     let processor_clone = processor.clone();
     ui.on_upload_clicked(move || {
@@ -95,29 +81,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|f| f.to_string_lossy().to_string())
                 .collect();
 
+            let result = load_pdfs_standalone(&paths);
+
             if let Some(ui) = ui_weak.upgrade() {
-                ui.set_loading(true);
-            }
-
-            let ui_weak_deferred = ui_weak.clone();
-            let proc_deferred = processor_clone.clone();
-            Timer::single_shot(std::time::Duration::from_millis(50), move || {
-                let result = load_pdfs_standalone(&paths);
-
-                if let Some(ui) = ui_weak_deferred.upgrade() {
-                    ui.set_loading(false);
-                    match result {
-                        Ok(load_result) => {
-                            let mut proc = proc_deferred.borrow_mut();
-                            apply_load_result(&mut proc, load_result);
-                            update_ui(&ui, &proc);
-                        }
-                        Err(e) => {
-                            show_error(&ui, &e);
-                        }
+                match result {
+                    Ok(load_result) => {
+                        let mut proc = processor_clone.borrow_mut();
+                        apply_load_result(&mut proc, load_result);
+                        update_ui(&ui, &proc);
+                    }
+                    Err(e) => {
+                        show_error(&ui, &e);
                     }
                 }
-            });
+            }
         }
     });
 
@@ -145,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Handle convert (save) button click — deferred to allow loading overlay to paint
+    // Handle convert (save) button click
     let ui_weak = ui.as_weak();
     let processor_clone = processor.clone();
     ui.on_convert_clicked(move || {
@@ -170,32 +147,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|p| (p.source_path.clone(), p.page_number, p.rotation))
                 .collect();
 
-            if let Some(ui) = ui_weak.upgrade() {
-                ui.set_loading(true);
-            }
-
             drop(proc);
 
-            let ui_weak_deferred = ui_weak.clone();
-            let proc_deferred = processor_clone.clone();
-            Timer::single_shot(std::time::Duration::from_millis(50), move || {
-                let result: Result<(), String> =
-                    save_pdf_standalone(&pages_data, &output).map_err(|e| e.to_string());
+            let result: Result<(), String> =
+                save_pdf_standalone(&pages_data, &output).map_err(|e| e.to_string());
 
-                if let Some(ui) = ui_weak_deferred.upgrade() {
-                    ui.set_loading(false);
-                    match result {
-                        Ok(_) => {
-                            let mut proc = proc_deferred.borrow_mut();
-                            proc.clear();
-                            update_ui(&ui, &proc);
-                        }
-                        Err(e) => {
-                            show_error(&ui, &e);
-                        }
+            if let Some(ui) = ui_weak.upgrade() {
+                match result {
+                    Ok(_) => {
+                        let mut proc = processor_clone.borrow_mut();
+                        proc.clear();
+                        update_ui(&ui, &proc);
+                    }
+                    Err(e) => {
+                        show_error(&ui, &e);
                     }
                 }
-            });
+            }
         }
     });
 

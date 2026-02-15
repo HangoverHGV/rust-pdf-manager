@@ -2,8 +2,8 @@
 name = "pdf-manager"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Merge, reorder, rotate and manage PDF documents"
+license = "MIT"
 
 [dependencies]
 lopdf = "0.39.0"
@@ -13,3 +13,19 @@ slint = "1.14.1"
 
 [build-dependencies]
 slint-build = "1.14.1"
+winresource = "0.1"
+image = "0.25"
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = true
+
+[package.metadata.deb]
+depends = "libpoppler-glib8, libcairo2, libgtk-3-0"
+section = "utils"
+assets = [
+    ["target/release/pdf-manager", "usr/bin/", "755"],
+    ["packaging/pdf-manager.desktop", "usr/share/applications/", "644"],
+    ["ui/images/Logo.png", "usr/share/icons/hicolor/1024x1024/apps/pdf-manager.png", "644"],
+]

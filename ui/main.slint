@@ -22,6 +22,8 @@ global DragConstants {
 }
 
 export component AppWindow inherits Window {
+    title: "PDF Manager";
+    icon: @image-url("images/Logo.png");
     preferred-width: 900px;
     preferred-height: 700px;
 
@@ -36,10 +38,6 @@ export component AppWindow inherits Window {
     // Error dialog state
     in-out property <bool> error-visible: false;
     in-out property <string> error-message: "";
-
-    // Loading overlay state
-    in-out property <bool> loading: false;
-    in-out property <float> spinner-angle: 0;
 
     callback upload-clicked();
     callback delete-page(int);
@@ -127,9 +125,6 @@ export component AppWindow inherits Window {
                                                 list-flick.viewport-y + event.delta-y,
                                                 min(0px, -list-flick.viewport-height + list-flick.height),
                                                 0px);
-                                            root.viewport-y = list-flick.viewport-y / 1px;
-                                            root.viewport-h = list-flick.height / 1px;
-                                            root.viewport-scrolled();
                                             if root.dragging {
                                                 root.drag-target-index = max(0, min(
                                                     root.page-list.length - 1,
@@ -285,44 +280,6 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-            }
-        }
-    }
-
-    // Loading overlay — blocks all interaction, shows spinner
-    if root.loading: Rectangle {
-        x: 0;
-        y: 0;
-        width: root.width;
-        height: root.height;
-        background: #000000aa;
-
-        TouchArea {
-            // Block all clicks
-        }
-
-        VerticalLayout {
-            alignment: center;
-            spacing: 16px;
-
-            HorizontalLayout {
-                alignment: center;
-
-                Image {
-                    source: Icons.spinner-icon;
-                    width: 48px;
-                    height: 48px;
-                    colorize: white;
-                    transform-rotation: root.spinner-angle * 1deg;
-                    transform-origin: { x: 24px, y: 24px };
-                }
-            }
-
-            Text {
-                text: "Processing...";
-                font-size: 18px;
-                color: white;
-                horizontal-alignment: center;
             }
         }
     }
