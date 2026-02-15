@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 
+use hayro::hayro_interpret::hayro_syntax::Pdf;
+use hayro::hayro_interpret::InterpreterSettings;
+use hayro::{render, RenderSettings};
 use lopdf::{Document, Object, ObjectId};
-use poppler::cairo;
-use poppler::PopplerDocument;
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 const PREVIEW_WIDTH: f64 = 120.0;
@@ -57,27 +58,21 @@ impl PdfProcessor {
         let page_item = &mut self.pages[index];
         page_item.rotation = (page_item.rotation + 90) % 360;
 
-        let poppler_doc = match PopplerDocument::new_from_file(&page_item.source_path, None) {
-            Ok(doc) => doc,
+        let data = match std::fs::read(&page_item.source_path) {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+
+        let pdf = match Pdf::new(&data) {
+            Ok(p) => p,
             Err(_) => return,
         };
 
         let page_index = page_item.page_number - 1;
-        if let Some(page) = poppler_doc.get_page(page_index) {
-            let (pw, ph) = page.get_size();
+        let pages: Vec<_> = pdf.pages().collect();
+        if let Some(Ok(page)) = pages.get(page_index) {
             let rotation = page_item.rotation;
-
-            let (ew, eh) = if rotation == 90 || rotation == 270 {
-                (ph, pw)
-            } else {
-                (pw, ph)
-            };
-
-            let scale = PREVIEW_WIDTH / ew;
-            let w = (ew * scale) as i32;
-            let h = (eh * scale) as i32;
-
-            if let Ok((rgba, width, height)) = render_page_to_rgba(&page, w, h, scale, rotation) {
+            if let Ok((rgba, width, height)) = render_page_to_rgba(page, rotation) {
                 self.pages[index].preview = rgba_to_image(&rgba, width, height);
             }
         }
@@ -130,23 +125,17 @@ pub fn load_pdfs_standalone(paths: &[String]) -> Result<LoadResult, String> {
             page_count,
         });
 
-        let poppler_doc = PopplerDocument::new_from_file(path, None)
-            .map_err(|e| format!("Error rendering {}: {}", path, e))?;
+        let data = std::fs::read(path).map_err(|e| format!("Error reading {}: {}", path, e))?;
 
-        for page_num in 0..page_count {
-            let (rgba, width, height) = match poppler_doc.get_page(page_num) {
-                Some(page) => {
-                    let (pw, ph) = page.get_size();
-                    let scale = PREVIEW_WIDTH / pw;
-                    let w = (pw * scale) as i32;
-                    let h = (ph * scale) as i32;
+        let pdf = Pdf::new(&data).map_err(|e| format!("Error parsing {}: {}", path, e))?;
 
-                    match render_page_to_rgba(&page, w, h, scale, 0) {
-                        Ok(data) => data,
-                        Err(_) => (Vec::new(), 0, 0),
-                    }
-                }
-                None => (Vec::new(), 0, 0),
+        for (page_num, page_result) in pdf.pages().enumerate() {
+            let (rgba, width, height) = match page_result {
+                Ok(ref page) => match render_page_to_rgba(page, 0) {
+                    Ok(data) => data,
+                    Err(_) => (Vec::new(), 0, 0),
+                },
+                Err(_) => (Vec::new(), 0, 0),
             };
 
             pages.push(RawPageData {
@@ -313,56 +302,45 @@ pub fn save_pdf_standalone(
     Ok(())
 }
 
-/// Render a page to raw RGBA bytes.
+/// Render a PDF page to raw RGBA bytes using hayro.
 fn render_page_to_rgba(
-    page: &poppler::PopplerPage,
-    w: i32,
-    h: i32,
-    scale: f64,
+    page: &hayro::hayro_interpret::hayro_syntax::page::Page<'_>,
     rotation: i32,
 ) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    let mut surface = cairo::ImageSurface::create(cairo::Format::ARgb32, w, h)?;
-    let ctx = cairo::Context::new(&surface)?;
+    let media_box = page.media_box();
+    let (pw, ph) = (media_box[2] - media_box[0], media_box[3] - media_box[1]);
 
-    ctx.set_source_rgb(1.0, 1.0, 1.0);
-    ctx.paint()?;
+    let (ew, eh) = if rotation == 90 || rotation == 270 {
+        (ph as f64, pw as f64)
+    } else {
+        (pw as f64, ph as f64)
+    };
 
-    let (pw, ph) = page.get_size();
-    match rotation {
-        90 => {
-            ctx.translate(w as f64, 0.0);
-            ctx.rotate(std::f64::consts::FRAC_PI_2);
-            ctx.scale(w as f64 / ph, h as f64 / pw);
-        }
-        180 => {
-            ctx.translate(w as f64, h as f64);
-            ctx.rotate(std::f64::consts::PI);
-            ctx.scale(scale, scale);
-        }
-        270 => {
-            ctx.translate(0.0, h as f64);
-            ctx.rotate(-std::f64::consts::FRAC_PI_2);
-            ctx.scale(w as f64 / ph, h as f64 / pw);
-        }
-        _ => {
-            ctx.scale(scale, scale);
-        }
-    }
-    page.render(&ctx);
+    let scale = PREVIEW_WIDTH / ew;
+    let w = (ew * scale) as u16;
+    let h = (eh * scale) as u16;
 
-    ctx.show_page()?;
-    drop(ctx);
-    surface.flush();
+    let render_settings = RenderSettings {
+        x_scale: scale as f32,
+        y_scale: scale as f32,
+        width: Some(w),
+        height: Some(h),
+        ..Default::default()
+    };
 
-    let data = surface.data()?;
-    let width = w as u32;
-    let height = h as u32;
-    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    let interpreter_settings = InterpreterSettings::default();
+    let pixmap = render(page, &interpreter_settings, &render_settings);
 
-    for pixel in data.chunks_exact(4) {
-        let b = pixel[0];
+    let src_data = pixmap.data_as_u8_slice();
+    let src_w = pixmap.width() as u32;
+    let src_h = pixmap.height() as u32;
+
+    // Unpremultiply alpha (hayro outputs premultiplied RGBA8)
+    let mut rgba = Vec::with_capacity(src_data.len());
+    for pixel in src_data.chunks_exact(4) {
+        let r = pixel[0];
         let g = pixel[1];
-        let r = pixel[2];
+        let b = pixel[2];
         let a = pixel[3];
 
         if a == 0 {
@@ -375,5 +353,58 @@ fn render_page_to_rgba(
         }
     }
 
-    Ok((rgba, width, height))
+    // Apply rotation to the pixel buffer
+    let (final_rgba, final_w, final_h) = rotate_rgba(&rgba, src_w, src_h, rotation);
+
+    Ok((final_rgba, final_w, final_h))
+}
+
+/// Rotate an RGBA pixel buffer by 0, 90, 180, or 270 degrees.
+fn rotate_rgba(data: &[u8], width: u32, height: u32, rotation: i32) -> (Vec<u8>, u32, u32) {
+    match rotation {
+        90 => {
+            let new_w = height;
+            let new_h = width;
+            let mut out = vec![0u8; (new_w * new_h * 4) as usize];
+            for y in 0..height {
+                for x in 0..width {
+                    let src = ((y * width + x) * 4) as usize;
+                    let dst_x = (height - 1 - y) as usize;
+                    let dst_y = x as usize;
+                    let dst = (dst_y * new_w as usize + dst_x) * 4;
+                    out[dst..dst + 4].copy_from_slice(&data[src..src + 4]);
+                }
+            }
+            (out, new_w, new_h)
+        }
+        180 => {
+            let mut out = vec![0u8; data.len()];
+            for y in 0..height {
+                for x in 0..width {
+                    let src = ((y * width + x) * 4) as usize;
+                    let dst_x = (width - 1 - x) as usize;
+                    let dst_y = (height - 1 - y) as usize;
+                    let dst = (dst_y * width as usize + dst_x) * 4;
+                    out[dst..dst + 4].copy_from_slice(&data[src..src + 4]);
+                }
+            }
+            (out, width, height)
+        }
+        270 => {
+            let new_w = height;
+            let new_h = width;
+            let mut out = vec![0u8; (new_w * new_h * 4) as usize];
+            for y in 0..height {
+                for x in 0..width {
+                    let src = ((y * width + x) * 4) as usize;
+                    let dst_x = y as usize;
+                    let dst_y = (width - 1 - x) as usize;
+                    let dst = (dst_y * new_w as usize + dst_x) * 4;
+                    out[dst..dst + 4].copy_from_slice(&data[src..src + 4]);
+                }
+            }
+            (out, new_w, new_h)
+        }
+        _ => (data.to_vec(), width, height),
+    }
 }

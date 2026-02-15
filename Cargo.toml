@@ -7,7 +7,7 @@ license = "MIT"
 
 [dependencies]
 lopdf = "0.39.0"
-poppler = { version = "0.6", features = ["render"] }
+hayro = "0.5"
 rfd = "0.15"
 slint = { version = "1.14.1", default-features = false, features = ["backend-winit", "renderer-femtovg", "compat-1-2"] }
 
@@ -22,7 +22,7 @@ strip = true
 lto = true
 
 [package.metadata.deb]
-depends = "libpoppler-glib8, libcairo2, libgtk-3-0"
+depends = ""
 section = "utils"
 assets = [
     ["target/release/pdf-manager", "usr/bin/", "755"],
