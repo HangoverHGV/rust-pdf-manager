@@ -1,0 +1,38 @@
+import { Button, VerticalBox } from "std-widgets.slint";
+import { TopBar } from "components/topbar.slint";
+import { EmptyState } from "components/empty-state.slint";
+import { Theme } from "styles/themes.slint";
+
+export component AppWindow inherits Window {
+    preferred-width: 900px;
+    preferred-height: 600px;
+    
+    in-out property <bool> has-files: false;
+    
+    VerticalBox {
+        spacing: 0px;
+
+        TopBar {
+            height: 80px;
+            width: 100%;
+        }
+        
+        Rectangle {
+            background: Theme.background;
+            
+            if !root.has-files: EmptyState {
+                upload-clicked => {
+                    debug("Upload PDF files");
+                    // root.has-files = true; // Set this when files are loaded
+                }
+            }
+            
+            if root.has-files: VerticalBox {
+                // Your PDF file list content here
+                Text {
+                    text: "Files loaded!";
+                }
+            }
+        }
+    }
+}

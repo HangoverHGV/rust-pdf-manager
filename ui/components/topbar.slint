@@ -1,0 +1,51 @@
+import { VerticalBox } from "std-widgets.slint";
+import {Theme} from "../styles/themes.slint";
+import { DynamicButton } from "buttons.slint";
+import { Icons } from "../styles/icons.slint";
+
+
+export component TopBar {
+    Rectangle {
+        background: Theme.background;
+        height: 80px;
+        
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 10px;
+            VerticalLayout {
+                Text {
+                    text: "PDF Editor";
+                    color: Theme.main-font-color;
+                    font-size: Theme.main-text-size;
+                    font-weight: Theme.font-weight-bold;
+                }
+                Text{
+                    text: "Merge, reorder and edit your PDF documents";
+                    color: Theme.secondary-font-color;
+                    font-size: Theme.secondary-text-size;
+                }
+            }
+            DynamicButton {
+                title: "Add Files";
+                icon: Icons.plus-icon;
+                background-color: #2196F3;  // Blue
+                hover-color: #1976D2;
+                pressed-color: #0D47A1;
+                clicked => {
+                    debug("Add clicked!");
+                }
+            }
+            
+            DynamicButton {
+                title: "Convert";
+                icon: Icons.loop-circular-arrows;
+                background-color: #4CAF50;  // Green
+                hover-color: #45a049;
+                pressed-color: #3d8b40;
+                clicked => {
+                    debug("Convert clicked!");
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,54 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Theme } from "../styles/themes.slint";
+
+
+export component DynamicButton {
+    in-out property <string> title;
+    in-out property <image> icon;
+    in-out property <length> icon-size: 24px;
+    in-out property <brush> background-color: #4CAF50;  // Custom background
+    in-out property <brush> hover-color: #45a049;
+    in-out property <brush> pressed-color: #3d8b40;
+    callback clicked;
+    
+    min-width: 120px;
+    min-height: 40px;
+    
+    Rectangle {
+        background: touch.pressed ? root.pressed-color : 
+                   (touch.has-hover ? root.hover-color : root.background-color);
+        border-radius: 6px;
+        
+        touch := TouchArea {
+            clicked => {
+                root.clicked();
+            }
+        }
+        VerticalBox {
+            
+            HorizontalBox {
+                alignment: center;  // Centers content horizontally
+                spacing: 12px;
+                padding-left: 16px;
+                padding-right: 16px;
+                
+                if root.icon.width > 0: Image {
+                    source: root.icon;
+                    width: root.icon-size;
+                    height: root.icon-size;
+                    colorize: #ffffff;  // White icon on colored background
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.title;
+                    color: #ffffff;  // White text on colored background
+                    font-size: Theme.main-text-size;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+    }
+}

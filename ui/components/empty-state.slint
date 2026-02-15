@@ -1,0 +1,74 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Theme } from "../styles/themes.slint";
+import { Icons } from "../styles/icons.slint";
+import { DynamicButton } from "buttons.slint";
+
+export component EmptyState inherits Rectangle {
+    callback upload-clicked();
+    
+    background: Theme.file-window-background;
+    
+    VerticalBox {
+        alignment: center;
+        spacing: 24px;
+        
+        // Document icon
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 120px;
+                height: 120px;
+                background: #e0e0e0;
+                border-radius: 60px;
+                HorizontalBox {
+                    alignment: center;
+                    VerticalBox {
+                        alignment: center;
+                        Image {
+                            source: Icons.document-icon; 
+                            width: 64px;
+                            height: 64px;
+                            colorize: #9e9e9e;
+                        }
+                    }
+                }
+
+            }
+        }
+
+        
+        // Text content
+        VerticalBox {
+            alignment: center;
+            spacing: 12px;
+            
+            Text {
+                text: "No PDF files loaded";
+                font-size: 24px;
+                font-weight: Theme.font-weight-semibold;
+                color: Theme.main-font-color;
+                horizontal-alignment: center;
+            }
+            
+            Text {
+                text: "Upload one or more PDF files to get started";
+                font-size: 16px;
+                color: Theme.secondary-font-color;
+                horizontal-alignment: center;
+            }
+        }
+        
+        // Upload button
+        DynamicButton {
+            title: "Upload PDF Files";
+            icon: Icons.plus-icon;
+            background-color: #2196F3;
+            hover-color: #1976D2;
+            pressed-color: #0D47A1;
+            icon-size: 20px;
+            clicked => {
+                root.upload-clicked();
+            }
+        }
+    }
+}
