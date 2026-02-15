@@ -33,11 +33,20 @@ export component AppWindow inherits Window {
     property <int> drag-source-index: -1;
     property <int> drag-target-index: -1;
 
+    // Error dialog state
+    in-out property <bool> error-visible: false;
+    in-out property <string> error-message: "";
+
+    // Loading overlay state
+    in-out property <bool> loading: false;
+    in-out property <float> spinner-angle: 0;
+
     callback upload-clicked();
     callback delete-page(int);
     callback move-page(int, int);
     callback convert-clicked();
     callback clear-clicked();
+    callback rotate-page(int);
 
     VerticalBox {
         spacing: 0px;
@@ -219,10 +228,35 @@ export component AppWindow inherits Window {
                             // Spacer
                             Rectangle { }
 
-                            // Delete button
+                            // Action buttons
                             VerticalLayout {
                                 alignment: center;
+                                spacing: 8px;
 
+                                // Rotate button
+                                Rectangle {
+                                    width: 36px;
+                                    height: 36px;
+                                    border-radius: 18px;
+                                    background: rotate-touch.pressed ? #bbdefb : (rotate-touch.has-hover ? #e3f2fd : transparent);
+
+                                    rotate-touch := TouchArea {
+                                        clicked => {
+                                            root.rotate-page(index);
+                                        }
+                                    }
+
+                                    Image {
+                                        source: Icons.rotate-icon;
+                                        width: 20px;
+                                        height: 20px;
+                                        colorize: rotate-touch.has-hover ? #1976D2 : #9e9e9e;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                }
+
+                                // Delete button
                                 Rectangle {
                                     width: 36px;
                                     height: 36px;
@@ -245,6 +279,117 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Loading overlay — blocks all interaction, shows spinner
+    if root.loading: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #000000aa;
+
+        TouchArea {
+            // Block all clicks
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 16px;
+
+            HorizontalLayout {
+                alignment: center;
+
+                Image {
+                    source: Icons.spinner-icon;
+                    width: 48px;
+                    height: 48px;
+                    colorize: white;
+                    transform-rotation: root.spinner-angle * 1deg;
+                    transform-origin: { x: 24px, y: 24px };
+                }
+            }
+
+            Text {
+                text: "Processing...";
+                font-size: 18px;
+                color: white;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    // Error dialog overlay
+    if root.error-visible: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000088;
+
+        TouchArea {
+            // Block all clicks
+        }
+
+        // Dialog card
+        Rectangle {
+            width: 400px;
+            height: 220px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: white;
+            border-radius: 12px;
+
+            VerticalLayout {
+                padding: 24px;
+                spacing: 12px;
+                alignment: start;
+
+                Text {
+                    text: "Error";
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #d32f2f;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: root.error-message;
+                    font-size: 14px;
+                    color: #333;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+
+                // Spacer
+                Rectangle { }
+
+                HorizontalLayout {
+                    alignment: center;
+
+                    Rectangle {
+                        width: 100px;
+                        height: 36px;
+                        border-radius: 6px;
+                        background: close-touch.pressed ? #b71c1c : (close-touch.has-hover ? #d32f2f : #f44336);
+
+                        close-touch := TouchArea {
+                            clicked => {
+                                root.error-visible = false;
+                            }
+                        }
+
+                        Text {
+                            text: "Close";
+                            color: white;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
                         }
                     }
                 }

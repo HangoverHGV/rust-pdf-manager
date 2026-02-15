@@ -1,9 +1,19 @@
 mod pdf_processor;
 
-use pdf_processor::PdfProcessor;
-use slint::*;
+use pdf_processor::{
+    load_pdfs_standalone, rgba_to_image, save_pdf_standalone, LoadResult, PageItem as ProcPageItem,
+    PdfProcessor,
+};
+use slint::{ModelRc, Timer, TimerMode, VecModel};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 slint::include_modules!();
+
+fn show_error(ui: &AppWindow, msg: &str) {
+    ui.set_error_message(msg.into());
+    ui.set_error_visible(true);
+}
 
 fn update_ui(ui: &AppWindow, proc: &PdfProcessor) {
     let pdf_files: Vec<PdfFile> = proc
@@ -31,11 +41,48 @@ fn update_ui(ui: &AppWindow, proc: &PdfProcessor) {
     ui.set_page_list(ModelRc::new(VecModel::from(page_list)));
 }
 
+fn apply_load_result(proc: &mut PdfProcessor, load_result: LoadResult) {
+    for f in load_result.files {
+        proc.files.push(pdf_processor::PdfFile {
+            path: f.path,
+            filename: f.filename,
+            page_count: f.page_count,
+        });
+    }
+    for p in load_result.pages {
+        let preview = rgba_to_image(&p.rgba, p.width, p.height);
+        proc.pages.push(ProcPageItem {
+            source_path: p.source_path,
+            source_file: p.source_file,
+            page_number: p.page_number,
+            display_text: p.display_text,
+            preview,
+            rotation: 0,
+        });
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui = AppWindow::new()?;
-    let processor = std::rc::Rc::new(std::cell::RefCell::new(PdfProcessor::new()));
+    let processor = Rc::new(RefCell::new(PdfProcessor::new()));
 
-    // Handle upload button click
+    // Spinner animation timer
+    let spinner_timer = Timer::default();
+    let ui_weak_spinner = ui.as_weak();
+    spinner_timer.start(
+        TimerMode::Repeated,
+        std::time::Duration::from_millis(16),
+        move || {
+            if let Some(ui) = ui_weak_spinner.upgrade() {
+                if ui.get_loading() {
+                    let angle = ui.get_spinner_angle();
+                    ui.set_spinner_angle((angle + 6.0) % 360.0);
+                }
+            }
+        },
+    );
+
+    // Handle upload button click — deferred to allow loading overlay to paint
     let ui_weak = ui.as_weak();
     let processor_clone = processor.clone();
     ui.on_upload_clicked(move || {
@@ -43,19 +90,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .add_filter("PDF Files", &["pdf"])
             .pick_files()
         {
-            let mut proc = processor_clone.borrow_mut();
-
-            for file in files {
-                let path = file.to_string_lossy().to_string();
-                match proc.load_pdf(&path) {
-                    Ok(_) => println!("Loaded: {}", path),
-                    Err(e) => eprintln!("Error loading {}: {}", path, e),
-                }
-            }
+            let paths: Vec<String> = files
+                .iter()
+                .map(|f| f.to_string_lossy().to_string())
+                .collect();
 
             if let Some(ui) = ui_weak.upgrade() {
-                update_ui(&ui, &proc);
+                ui.set_loading(true);
             }
+
+            // Defer heavy work to next event loop tick so loading overlay paints first
+            let ui_weak_deferred = ui_weak.clone();
+            let proc_deferred = processor_clone.clone();
+            Timer::single_shot(std::time::Duration::from_millis(50), move || {
+                let result = load_pdfs_standalone(&paths);
+
+                if let Some(ui) = ui_weak_deferred.upgrade() {
+                    ui.set_loading(false);
+                    match result {
+                        Ok(load_result) => {
+                            let mut proc = proc_deferred.borrow_mut();
+                            apply_load_result(&mut proc, load_result);
+                            update_ui(&ui, &proc);
+                        }
+                        Err(e) => {
+                            show_error(&ui, &e);
+                        }
+                    }
+                }
+            });
         }
     });
 
@@ -83,13 +146,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Handle convert (save) button click
+    // Handle convert (save) button click — deferred to allow loading overlay to paint
     let ui_weak = ui.as_weak();
     let processor_clone = processor.clone();
     ui.on_convert_clicked(move || {
-        let mut proc = processor_clone.borrow_mut();
+        let proc = processor_clone.borrow();
         if proc.pages.is_empty() {
-            eprintln!("No pages to save");
+            if let Some(ui) = ui_weak.upgrade() {
+                show_error(&ui, "No pages to save");
+            }
             return;
         }
 
@@ -99,16 +164,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .save_file()
         {
             let output = path.to_string_lossy().to_string();
-            match proc.save_pdf(&output) {
-                Ok(_) => {
-                    println!("Saved: {}", output);
-                    proc.clear();
-                    if let Some(ui) = ui_weak.upgrade() {
-                        update_ui(&ui, &proc);
+
+            let pages_data: Vec<(String, usize, i32)> = proc
+                .pages
+                .iter()
+                .map(|p| (p.source_path.clone(), p.page_number, p.rotation))
+                .collect();
+
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.set_loading(true);
+            }
+
+            drop(proc);
+
+            let ui_weak_deferred = ui_weak.clone();
+            let proc_deferred = processor_clone.clone();
+            Timer::single_shot(std::time::Duration::from_millis(50), move || {
+                let result: Result<(), String> =
+                    save_pdf_standalone(&pages_data, &output).map_err(|e| e.to_string());
+
+                if let Some(ui) = ui_weak_deferred.upgrade() {
+                    ui.set_loading(false);
+                    match result {
+                        Ok(_) => {
+                            let mut proc = proc_deferred.borrow_mut();
+                            proc.clear();
+                            update_ui(&ui, &proc);
+                        }
+                        Err(e) => {
+                            show_error(&ui, &e);
+                        }
                     }
                 }
-                Err(e) => eprintln!("Error saving PDF: {}", e),
-            }
+            });
+        }
+    });
+
+    // Handle rotate page
+    let ui_weak = ui.as_weak();
+    let processor_clone = processor.clone();
+    ui.on_rotate_page(move |index| {
+        let mut proc = processor_clone.borrow_mut();
+        proc.rotate_page(index as usize);
+
+        if let Some(ui) = ui_weak.upgrade() {
+            update_ui(&ui, &proc);
         }
     });
 
