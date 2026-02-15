@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 lopdf = "0.39.0"
+rfd = "0.15"
 slint = "1.14.1"
 
 [build-dependencies]

@@ -1,36 +1,96 @@
-import { Button, VerticalBox } from "std-widgets.slint";
+import { Button, VerticalBox, ScrollView } from "std-widgets.slint";
 import { TopBar } from "components/topbar.slint";
 import { EmptyState } from "components/empty-state.slint";
 import { Theme } from "styles/themes.slint";
+import { Icons } from "styles/icons.slint";
+
+export struct PdfFile {
+    path: string,
+    filename: string,
+    page-count: int,
+}
+
+export struct PageItem {
+    source-file: string,
+    page-number: int,
+    display-text: string,
+}
 
 export component AppWindow inherits Window {
     preferred-width: 900px;
     preferred-height: 600px;
-    
-    in-out property <bool> has-files: false;
-    
+
+    in-out property <[PdfFile]> pdf-files;
+    in-out property <[PageItem]> page-list;
+
+    callback upload-clicked();
+
     VerticalBox {
         spacing: 0px;
 
         TopBar {
             height: 80px;
             width: 100%;
+            upload-clicked => {
+                root.upload-clicked();
+            }
         }
-        
+
         Rectangle {
-            background: Theme.background;
-            
-            if !root.has-files: EmptyState {
+            background: Theme.file-window-background;
+
+            if pdf-files.length == 0: EmptyState {
                 upload-clicked => {
-                    debug("Upload PDF files");
-                    // root.has-files = true; // Set this when files are loaded
+                    root.upload-clicked();
                 }
             }
-            
-            if root.has-files: VerticalBox {
-                // Your PDF file list content here
-                Text {
-                    text: "Files loaded!";
+
+            if pdf-files.length > 0: ScrollView {
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+
+                    for page in root.page-list: Rectangle {
+                        height: 56px;
+                        background: Theme.background;
+                        border-radius: 8px;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 12px;
+                            alignment: start;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    source: Icons.document-icon;
+                                    width: 28px;
+                                    height: 28px;
+                                    colorize: #2196F3;
+                                }
+                            }
+
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+
+                                Text {
+                                    text: page.source-file;
+                                    font-size: 14px;
+                                    font-weight: Theme.font-weight-semibold;
+                                    color: Theme.main-font-color;
+                                    overflow: elide;
+                                }
+
+                                Text {
+                                    text: "Page " + page.page-number;
+                                    font-size: 12px;
+                                    color: Theme.secondary-font-color;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
