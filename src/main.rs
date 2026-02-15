@@ -44,7 +44,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .pick_files()
         {
             let mut proc = processor_clone.borrow_mut();
-            proc.clear();
 
             for file in files {
                 let path = file.to_string_lossy().to_string();
@@ -67,6 +66,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut proc = processor_clone.borrow_mut();
         proc.remove_page(index as usize);
 
+        if let Some(ui) = ui_weak.upgrade() {
+            update_ui(&ui, &proc);
+        }
+    });
+
+    // Handle move page (drag-and-drop reorder)
+    let ui_weak = ui.as_weak();
+    let processor_clone = processor.clone();
+    ui.on_move_page(move |from, to| {
+        let mut proc = processor_clone.borrow_mut();
+        proc.move_page(from as usize, to as usize);
+
+        if let Some(ui) = ui_weak.upgrade() {
+            update_ui(&ui, &proc);
+        }
+    });
+
+    // Handle convert (save) button click
+    let ui_weak = ui.as_weak();
+    let processor_clone = processor.clone();
+    ui.on_convert_clicked(move || {
+        let mut proc = processor_clone.borrow_mut();
+        if proc.pages.is_empty() {
+            eprintln!("No pages to save");
+            return;
+        }
+
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("PDF Files", &["pdf"])
+            .set_file_name("merged.pdf")
+            .save_file()
+        {
+            let output = path.to_string_lossy().to_string();
+            match proc.save_pdf(&output) {
+                Ok(_) => {
+                    println!("Saved: {}", output);
+                    proc.clear();
+                    if let Some(ui) = ui_weak.upgrade() {
+                        update_ui(&ui, &proc);
+                    }
+                }
+                Err(e) => eprintln!("Error saving PDF: {}", e),
+            }
+        }
+    });
+
+    // Handle clear button click
+    let ui_weak = ui.as_weak();
+    let processor_clone = processor.clone();
+    ui.on_clear_clicked(move || {
+        let mut proc = processor_clone.borrow_mut();
+        proc.clear();
         if let Some(ui) = ui_weak.upgrade() {
             update_ui(&ui, &proc);
         }

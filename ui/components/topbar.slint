@@ -6,6 +6,8 @@ import { Icons } from "../styles/icons.slint";
 
 export component TopBar {
     callback upload-clicked();
+    callback convert-clicked();
+    callback clear-clicked();
     Rectangle {
         background: Theme.background;
         height: 80px;
@@ -29,9 +31,11 @@ export component TopBar {
             }
 
             DynamicButton {
+
                 title: "Add Files";
                 icon: Icons.plus-icon;
-                background-color: #2196F3;  // Blue
+                background-color: #2196F3; 
+                height: parent.height / 2 + 10px;
                 hover-color: #1976D2;
                 pressed-color: #0D47A1;
                 clicked => {
@@ -44,9 +48,22 @@ export component TopBar {
                 icon: Icons.loop-circular-arrows;
                 background-color: #4CAF50;  // Green
                 hover-color: #45a049;
+                height: parent.height / 2 + 10px;
                 pressed-color: #3d8b40;
                 clicked => {
-                    debug("Convert clicked!");
+                    root.convert-clicked();
+                }
+            }
+
+            DynamicButton {
+                title: "Clear";
+                icon: Icons.clear-icon;
+                background-color: #f44336;  // Red
+                hover-color: #d32f2f;
+                height: parent.height / 2 + 10px;
+                pressed-color: #b71c1c;
+                clicked => {
+                    root.clear-clicked();
                 }
             }
         }

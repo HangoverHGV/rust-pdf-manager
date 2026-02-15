@@ -1,4 +1,4 @@
-import { Button, VerticalBox, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox } from "std-widgets.slint";
 import { TopBar } from "components/topbar.slint";
 import { EmptyState } from "components/empty-state.slint";
 import { Theme } from "styles/themes.slint";
@@ -17,15 +17,27 @@ export struct PageItem {
     preview: image,
 }
 
+global DragConstants {
+    out property <length> item-height: 192px; // 180px card + 12px spacing
+}
+
 export component AppWindow inherits Window {
     preferred-width: 900px;
-    preferred-height: 600px;
+    preferred-height: 700px;
 
     in-out property <[PdfFile]> pdf-files;
     in-out property <[PageItem]> page-list;
 
+    // Drag state
+    property <bool> dragging: false;
+    property <int> drag-source-index: -1;
+    property <int> drag-target-index: -1;
+
     callback upload-clicked();
     callback delete-page(int);
+    callback move-page(int, int);
+    callback convert-clicked();
+    callback clear-clicked();
 
     VerticalBox {
         spacing: 0px;
@@ -35,6 +47,12 @@ export component AppWindow inherits Window {
             width: 100%;
             upload-clicked => {
                 root.upload-clicked();
+            }
+            convert-clicked => {
+                root.convert-clicked();
+            }
+            clear-clicked => {
+                root.clear-clicked();
             }
         }
 
@@ -47,7 +65,10 @@ export component AppWindow inherits Window {
                 }
             }
 
-            if pdf-files.length > 0: ScrollView {
+            if pdf-files.length > 0: list-flick := Flickable {
+                interactive: false;
+                viewport-height: 32px + root.page-list.length * DragConstants.item-height;
+
                 VerticalLayout {
                     padding: 16px;
                     spacing: 12px;
@@ -56,10 +77,110 @@ export component AppWindow inherits Window {
                         height: 180px;
                         background: Theme.background;
                         border-radius: 8px;
+                        opacity: root.dragging && root.drag-source-index == index ? 0.4 : 1.0;
+
+                        // Drop indicator line above this item
+                        if root.dragging && root.drag-target-index == index && root.drag-source-index != index: Rectangle {
+                            y: -8px;
+                            height: 3px;
+                            background: #2196F3;
+                            border-radius: 2px;
+                        }
+
+                        // Card-level scroll handler — allows scroll wheel anywhere on the card
+                        card-scroll := TouchArea {
+                            scroll-event(event) => {
+                                list-flick.viewport-y = clamp(
+                                    list-flick.viewport-y + event.delta-y,
+                                    min(0px, -list-flick.viewport-height + list-flick.height),
+                                    0px);
+                                return accept;
+                            }
+                        }
 
                         HorizontalLayout {
                             padding: 12px;
                             spacing: 12px;
+
+                            // Drag handle
+                            VerticalLayout {
+                                alignment: center;
+
+                                Rectangle {
+                                    width: 28px;
+                                    height: 36px;
+
+                                    drag-touch := TouchArea {
+                                        mouse-cursor: root.dragging ? grabbing : grab;
+
+                                        scroll-event(event) => {
+                                            list-flick.viewport-y = clamp(
+                                                list-flick.viewport-y + event.delta-y,
+                                                min(0px, -list-flick.viewport-height + list-flick.height),
+                                                0px);
+                                            if root.dragging {
+                                                root.drag-target-index = max(0, min(
+                                                    root.page-list.length - 1,
+                                                    floor(
+                                                        (index * DragConstants.item-height + self.mouse-y + DragConstants.item-height / 2) / DragConstants.item-height)));
+                                            }
+                                            return accept;
+                                        }
+
+                                        pointer-event(event) => {
+                                            if event.button == PointerEventButton.left {
+                                                if event.kind == PointerEventKind.down {
+                                                    root.dragging = true;
+                                                    root.drag-source-index = index;
+                                                    root.drag-target-index = index;
+                                                } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                                                    if root.dragging && root.drag-source-index != root.drag-target-index && root.drag-source-index >= 0 && root.drag-target-index >= 0 {
+                                                        root.move-page(root.drag-source-index, root.drag-target-index);
+                                                    }
+                                                    root.dragging = false;
+                                                    root.drag-source-index = -1;
+                                                    root.drag-target-index = -1;
+                                                }
+                                            }
+                                        }
+
+                                        moved => {
+                                            if root.dragging {
+                                                root.drag-target-index = max(0, min(
+                                                    root.page-list.length - 1,
+                                                    floor(
+                                                        (index * DragConstants.item-height + self.mouse-y + DragConstants.item-height / 2) / DragConstants.item-height)));
+                                            }
+                                        }
+                                    }
+
+                                    // Drag handle dots
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 3px;
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+
+                                        for dot-row in 3: HorizontalLayout {
+                                            spacing: 4px;
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 4px;
+                                                height: 4px;
+                                                border-radius: 2px;
+                                                background: drag-touch.has-hover ? #666 : #bbb;
+                                            }
+
+                                            Rectangle {
+                                                width: 4px;
+                                                height: 4px;
+                                                border-radius: 2px;
+                                                background: drag-touch.has-hover ? #666 : #bbb;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             // Page preview thumbnail
                             Rectangle {
